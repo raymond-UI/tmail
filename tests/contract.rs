@@ -140,6 +140,15 @@ fn bad_since_is_config_exit_7_before_network() {
 }
 
 #[test]
+fn read_limit_zero_is_config_not_silent_empty() {
+    // `--limit 0` used to return [] silently; it must now be a clean CONFIG
+    // error at parse time (before any network), never an empty success.
+    let out = run(&["read", "--handle", HANDLE_BLOB, "--limit", "0"]);
+    assert_eq!(out.code, 7, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("\"code\":\"CONFIG\""));
+}
+
+#[test]
 fn missing_subcommand_is_usage_error() {
     // clap usage errors are distinct from our runtime contract codes.
     let out = run(&[]);

@@ -19,8 +19,9 @@ pub trait Receiver {
     async fn new_inbox(&self) -> Result<InboxRecord>;
     /// List messages, newest-first (summaries only — no body hydration).
     async fn read(&self, handle: &Handle) -> Result<Vec<Message>>;
-    /// Fetch one message with its full body.
+    /// Fetch one message with its full body (and mark it read upstream).
     async fn get(&self, handle: &Handle, msg_id: &str) -> Result<Message>;
-    /// Delete the inbox upstream (best-effort).
-    async fn delete(&self, handle: &Handle) -> Result<()>;
+    /// Delete the inbox upstream. Returns whether it still existed (`false` if it
+    /// was already gone — the delete is idempotent).
+    async fn delete(&self, handle: &Handle) -> Result<bool>;
 }

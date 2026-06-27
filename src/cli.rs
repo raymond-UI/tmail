@@ -88,9 +88,9 @@ pub struct ReadArgs {
     /// Only show messages at/after this ISO-8601 timestamp.
     #[arg(long)]
     pub since: Option<String>,
-    /// Maximum number of messages to return.
-    #[arg(long, default_value_t = 50)]
-    pub limit: usize,
+    /// Maximum number of messages to return (must be >= 1).
+    #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u64).range(1..))]
+    pub limit: u64,
 }
 
 /// `tmail get <id|address> <msgId>` — or just `<msgId>` with `--handle`/one inbox.

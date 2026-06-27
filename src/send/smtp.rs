@@ -11,6 +11,7 @@ use lettre::message::{
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 
+use crate::diag;
 use crate::error::{AppError, ErrorCode, Result};
 use crate::send::{OutboundMessage, SendReceipt, Sender};
 use crate::util;
@@ -24,6 +25,19 @@ impl SmtpSender {
     /// Build the transport from a `smtp(s)://…` URL.
     pub fn from_url(url: &str) -> Result<SmtpSender> {
         let parsed = SmtpUrl::parse(url)?;
+        // Log only host/port/mode — never the credentialed URL.
+        diag::log(1, || {
+            format!(
+                "smtp transport {}:{} ({})",
+                parsed.host,
+                parsed.port,
+                if parsed.implicit_tls {
+                    "implicit-tls"
+                } else {
+                    "starttls"
+                }
+            )
+        });
 
         let builder = if parsed.implicit_tls {
             AsyncSmtpTransport::<Tokio1Executor>::relay(&parsed.host)
@@ -50,12 +64,21 @@ impl Sender for SmtpSender {
         let id = generate_message_id(&message.from);
         let email = build_email(&message, &id)?;
 
+        diag::log(1, || {
+            format!(
+                "smtp send: {} recipient(s), message-id <{id}>",
+                recipients.len()
+            )
+        });
         match self.transport.send(email).await {
-            Ok(_) => Ok(SendReceipt {
-                message_id: format!("<{id}>"),
-                accepted: recipients,
-                transport: "smtp",
-            }),
+            Ok(_) => {
+                diag::log(1, || "smtp send: accepted".to_string());
+                Ok(SendReceipt {
+                    message_id: format!("<{id}>"),
+                    accepted: recipients,
+                    transport: "smtp",
+                })
+            }
             Err(e) => Err(classify_send_error(e)),
         }
     }

@@ -7,6 +7,7 @@ mod app;
 mod cli;
 mod commands;
 mod config;
+mod diag;
 mod error;
 mod http;
 mod model;
@@ -30,6 +31,7 @@ fn main() {
         Err(e) => exit_from_clap_error(e),
     };
     let pretty = cli.globals.pretty;
+    diag::set_level(cli.globals.verbose);
 
     let result = build_runtime().and_then(|rt| rt.block_on(app::dispatch(cli)));
 

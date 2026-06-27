@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use reqwest::{Method, Response, StatusCode};
 use serde::Deserialize;
 
+use crate::diag;
 use crate::error::{AppError, ErrorCode, Result};
 use crate::http;
 use crate::model::{Handle, InboxRecord, Message};
@@ -47,6 +48,7 @@ impl MailTm {
 
     /// Pick an active, non-private domain (DESIGN.md §6).
     async fn pick_domain(&self) -> Result<String> {
+        diag::log(1, || format!("GET {}", self.url("/domains")));
         let resp = self.client.get(self.url("/domains")).send().await?;
         let resp = ensure_ok(resp).await?;
         let coll: Collection<ApiDomain> = resp.json().await?;
@@ -64,6 +66,7 @@ impl MailTm {
 
     /// Create an account, returning its server-side id and canonical address.
     async fn create_account(&self, address: &str, password: &str) -> Result<ApiAccount> {
+        diag::log(1, || format!("POST {} ({address})", self.url("/accounts")));
         let resp = self
             .client
             .post(self.url("/accounts"))
@@ -76,6 +79,7 @@ impl MailTm {
 
     /// Exchange credentials for a bearer token.
     async fn token(&self, address: &str, password: &str) -> Result<String> {
+        diag::log(1, || format!("POST {} ({address})", self.url("/token")));
         let resp = self
             .client
             .post(self.url("/token"))
@@ -91,6 +95,7 @@ impl MailTm {
     /// (DESIGN.md §6). Returns the raw response for the caller to interpret.
     async fn authed(&self, method: Method, path: &str, handle: &Handle) -> Result<Response> {
         let url = self.url(path);
+        diag::log(1, || format!("{method} {url}"));
         let resp = self
             .client
             .request(method.clone(), &url)
@@ -98,6 +103,7 @@ impl MailTm {
             .send()
             .await?;
         if resp.status() == StatusCode::UNAUTHORIZED {
+            diag::log(1, || format!("401 {url} -> refreshing token"));
             let fresh = self.token(&handle.address, &handle.password).await?;
             let resp = self
                 .client
@@ -108,6 +114,29 @@ impl MailTm {
             return Ok(resp);
         }
         Ok(resp)
+    }
+
+    /// Mark a message read upstream so a later `read --unread` excludes it.
+    /// Best-effort: any failure here is logged and ignored so it never fails the
+    /// surrounding `get` (DESIGN.md §4). Uses merge-patch per the mail.tm API.
+    async fn mark_seen(&self, handle: &Handle, msg_id: &str) {
+        let url = self.url(&format!("/messages/{msg_id}"));
+        diag::log(1, || format!("PATCH {url} (seen=true)"));
+        let attempt = self
+            .client
+            .patch(&url)
+            .bearer_auth(&handle.token)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/merge-patch+json",
+            )
+            .json(&serde_json::json!({ "seen": true }))
+            .send()
+            .await;
+        match attempt {
+            Ok(resp) => diag::log(2, || format!("<- {} (mark-seen)", resp.status())),
+            Err(e) => diag::log(1, || format!("mark-seen failed (ignored): {e}")),
+        }
     }
 }
 
@@ -148,24 +177,29 @@ impl Receiver for MailTm {
         let resp = self.authed(Method::GET, &path, handle).await?;
         let resp = ensure_ok(resp).await?;
         let full: ApiMsgFull = resp.json().await?;
-        Ok(Message::from(full))
+        let message = Message::from(full);
+        // Reading a message marks it read, so `read --unread` excludes it next
+        // time. Best-effort — never fail the get on a mark-seen error.
+        self.mark_seen(handle, msg_id).await;
+        Ok(message)
     }
 
-    async fn delete(&self, handle: &Handle) -> Result<()> {
+    async fn delete(&self, handle: &Handle) -> Result<bool> {
         let path = format!("/accounts/{}", handle.account_id);
         let resp = self.authed(Method::DELETE, &path, handle).await?;
-        // Already-gone is success for an idempotent delete.
+        // Already-gone is idempotent success, but report that nothing was there.
         if resp.status() == StatusCode::NOT_FOUND {
-            return Ok(());
+            return Ok(false);
         }
         ensure_ok(resp).await?;
-        Ok(())
+        Ok(true)
     }
 }
 
 /// Map a non-success status to a typed [`AppError`]; pass success through.
 async fn ensure_ok(resp: Response) -> Result<Response> {
     let status = resp.status();
+    diag::log(2, || format!("<- {status}"));
     if status.is_success() {
         return Ok(resp);
     }

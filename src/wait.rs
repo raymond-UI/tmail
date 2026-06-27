@@ -269,8 +269,8 @@ mod tests {
         async fn get(&self, _h: &Handle, msg_id: &str) -> Result<Message> {
             Ok(msg(msg_id, "a@x", "s", false, "2026-06-27T11:00:00Z"))
         }
-        async fn delete(&self, _h: &Handle) -> Result<()> {
-            Ok(())
+        async fn delete(&self, _h: &Handle) -> Result<bool> {
+            Ok(true)
         }
     }
 

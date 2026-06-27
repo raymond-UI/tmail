@@ -32,7 +32,7 @@ pub async fn run_read(ctx: &Ctx, args: &ReadArgs) -> Result<()> {
             // No `--since`, or a message we can't date — keep it.
             _ => true,
         })
-        .take(args.limit)
+        .take(args.limit as usize)
         .map(|m| m.summary())
         .collect();
 

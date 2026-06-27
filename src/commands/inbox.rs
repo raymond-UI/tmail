@@ -36,11 +36,26 @@ pub fn run_ls(ctx: &Ctx) -> Result<()> {
 }
 
 /// `tmail rm` — best-effort upstream delete, then forget locally. Idempotent.
+///
+/// `existed` reports whether the deletion target was actually there: with
+/// `--handle` that means the inbox still existed upstream (the API returned
+/// something other than 404); via the local store it means the id/address was
+/// stored. Either way `false` means "nothing to remove" and the exit is still 0.
 pub async fn run_rm(ctx: &Ctx, args: &RmArgs) -> Result<()> {
     // Stateless: delete using the supplied handle, nothing local to forget.
     if let Some(blob) = &ctx.globals.handle {
         let handle = Handle::decode(blob)?;
-        let existed = ctx.receiver()?.delete(&handle).await.is_ok();
+        let existed = match ctx.receiver()?.delete(&handle).await {
+            Ok(existed) => existed,
+            Err(e) => {
+                // Best-effort: a transport failure still reports idempotent
+                // success, but the caller learns nothing was confirmed removed.
+                crate::diag::log(1, || {
+                    format!("rm upstream delete failed (ignored): {}", e.message)
+                });
+                false
+            }
+        };
         return emit_success(
             &json!({ "removed": handle.address, "existed": existed }),
             ctx.pretty(),
@@ -56,7 +71,11 @@ pub async fn run_rm(ctx: &Ctx, args: &RmArgs) -> Result<()> {
 
     let removed = Store::open_default()?.remove(target)?;
     if let Some(record) = &removed {
-        let _ = ctx.receiver()?.delete(&record.handle).await; // best-effort
+        if let Err(e) = ctx.receiver()?.delete(&record.handle).await {
+            crate::diag::log(1, || {
+                format!("rm upstream delete failed (ignored): {}", e.message)
+            });
+        }
     }
     // Idempotent: unknown target still exits 0, but `existed` tells the caller
     // whether anything was actually there (DESIGN.md §4).
