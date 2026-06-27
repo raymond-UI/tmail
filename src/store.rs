@@ -25,7 +25,8 @@ impl Store {
         })
     }
 
-    /// Open the store at an explicit path (used by tests).
+    /// Open the store at an explicit path (test-only seam).
+    #[cfg(test)]
     pub fn with_path(path: impl Into<PathBuf>) -> Store {
         Store { path: path.into() }
     }

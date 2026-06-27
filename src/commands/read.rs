@@ -12,16 +12,17 @@ use crate::util::{parse_rfc3339, require_rfc3339};
 
 /// `tmail read` — list messages newest-first; never blocks.
 pub async fn run_read(ctx: &Ctx, args: &ReadArgs) -> Result<()> {
+    // Validate user input before any network work (fail fast on bad --since).
+    let since = match &args.since {
+        Some(s) => Some(require_rfc3339("--since", s)?),
+        None => None,
+    };
+
     let handle = ctx.resolve_handle(args.target.as_deref())?;
     let mut messages = ctx.receiver()?.read(&handle).await?;
 
     // Newest-first; unparseable dates (None is the smallest) sort last.
     messages.sort_by_key(|m| std::cmp::Reverse(parse_rfc3339(&m.date)));
-
-    let since = match &args.since {
-        Some(s) => Some(require_rfc3339("--since", s)?),
-        None => None,
-    };
 
     let summaries: Vec<_> = messages
         .into_iter()

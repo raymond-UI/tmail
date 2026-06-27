@@ -3,11 +3,6 @@
 //! Entrypoint: parse args, run the dispatcher on a Tokio runtime, and map the
 //! `Result` to a stable process exit code (DESIGN.md §3, §8).
 
-// The crate is built epic by epic; foundational APIs land before their first
-// caller. This allow is removed in the final epic, which re-validates that
-// nothing is genuinely dead once every command is wired.
-#![allow(dead_code)]
-
 mod app;
 mod cli;
 mod commands;

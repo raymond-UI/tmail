@@ -89,10 +89,3 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         Command::Send(a) => commands::send::run_send(&ctx, &a).await,
     }
 }
-
-fn not_implemented(cmd: &str) -> Result<()> {
-    Err(AppError::new(
-        ErrorCode::Generic,
-        format!("command not yet implemented: {cmd}"),
-    ))
-}

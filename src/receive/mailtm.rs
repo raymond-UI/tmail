@@ -32,7 +32,8 @@ impl MailTm {
         }
     }
 
-    /// Construct against a custom base URL (used by tests / mocks).
+    /// Construct against a custom base URL (used by mock tests; see #43).
+    #[allow(dead_code)]
     pub fn with_base(client: reqwest::Client, base: impl Into<String>) -> Self {
         MailTm {
             client,

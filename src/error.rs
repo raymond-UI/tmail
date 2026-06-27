@@ -93,12 +93,6 @@ impl AppError {
         }
     }
 
-    /// Attach a `Retry-After` hint (milliseconds).
-    pub fn with_retry_after_ms(mut self, ms: u64) -> Self {
-        self.retry_after_ms = Some(ms);
-        self
-    }
-
     /// The process exit code for this error.
     pub fn exit_code(&self) -> i32 {
         self.code.exit_code()

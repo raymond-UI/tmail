@@ -9,6 +9,10 @@ use reqwest_eventsource::EventSource;
 use crate::error::{AppError, ErrorCode, Result};
 
 /// Open a bearer-authenticated event stream against a Mercure topic URL.
+///
+/// Not yet wired into the poll loop — the seam exists ahead of the full SSE
+/// optimization (DESIGN.md §6, §14).
+#[allow(dead_code)]
 pub fn open(client: &reqwest::Client, url: &str, token: &str) -> Result<EventSource> {
     let request = client.get(url).bearer_auth(token);
     EventSource::new(request)

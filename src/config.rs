@@ -22,8 +22,9 @@ pub struct Config {
     /// SMTP send transport settings.
     #[serde(default)]
     pub smtp: Option<SmtpConfig>,
-    /// Reserved for future multi-provider support.
+    /// Reserved for future multi-provider support (accepted but not yet read).
     #[serde(default)]
+    #[allow(dead_code)]
     pub provider: Option<ProviderConfig>,
     /// Tunable defaults for the blocking verbs.
     #[serde(default)]
@@ -45,6 +46,7 @@ pub struct SmtpConfig {
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     /// Default receive provider; only `mail.tm` exists today.
+    #[allow(dead_code)]
     pub default: Option<String>,
 }
 
