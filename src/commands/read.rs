@@ -1,14 +1,14 @@
 //! Message retrieval commands: `read`, `get` (DESIGN.md §4).
 
 use serde_json::json;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::app::Ctx;
 use crate::cli::{GetArgs, ReadArgs};
-use crate::error::{AppError, Result};
+use crate::error::Result;
 use crate::model::Message;
 use crate::output::emit_success;
 use crate::receive::Receiver;
+use crate::util::{parse_rfc3339, require_rfc3339};
 
 /// `tmail read` — list messages newest-first; never blocks.
 pub async fn run_read(ctx: &Ctx, args: &ReadArgs) -> Result<()> {
@@ -16,17 +16,17 @@ pub async fn run_read(ctx: &Ctx, args: &ReadArgs) -> Result<()> {
     let mut messages = ctx.receiver()?.read(&handle).await?;
 
     // Newest-first; unparseable dates (None is the smallest) sort last.
-    messages.sort_by_key(|m| std::cmp::Reverse(parse_date(&m.date)));
+    messages.sort_by_key(|m| std::cmp::Reverse(parse_rfc3339(&m.date)));
 
     let since = match &args.since {
-        Some(s) => Some(parse_required_date(s)?),
+        Some(s) => Some(require_rfc3339("--since", s)?),
         None => None,
     };
 
     let summaries: Vec<_> = messages
         .into_iter()
         .filter(|m| !args.unread || !m.seen)
-        .filter(|m| match (since, parse_date(&m.date)) {
+        .filter(|m| match (since, parse_rfc3339(&m.date)) {
             (Some(since), Some(date)) => date >= since,
             // No `--since`, or a message we can't date — keep it.
             _ => true,
@@ -59,15 +59,4 @@ pub async fn run_get(ctx: &Ctx, args: &GetArgs) -> Result<()> {
         }
     }
     emit_success(&value, ctx.pretty())
-}
-
-/// Parse an ISO-8601 timestamp for sorting/filtering; `None` if unparseable.
-fn parse_date(s: &str) -> Option<OffsetDateTime> {
-    OffsetDateTime::parse(s, &Rfc3339).ok()
-}
-
-/// Parse a user-supplied `--since`, mapping a bad value to a `CONFIG` error.
-fn parse_required_date(s: &str) -> Result<OffsetDateTime> {
-    OffsetDateTime::parse(s, &Rfc3339)
-        .map_err(|_| AppError::config(format!("--since must be ISO-8601 (RFC-3339): got '{s}'")))
 }

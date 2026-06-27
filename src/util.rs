@@ -3,6 +3,8 @@
 use rand::Rng;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+use crate::error::{AppError, Result};
+
 const ALNUM: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 const ALNUM_MIXED: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -41,6 +43,17 @@ pub fn gen_password() -> String {
 /// Our short, user-facing inbox id (DESIGN.md §4 shows e.g. `a1b2c3`).
 pub fn gen_short_id() -> String {
     random_alnum(6)
+}
+
+/// Parse an ISO-8601 / RFC-3339 timestamp; `None` if unparseable.
+pub fn parse_rfc3339(s: &str) -> Option<OffsetDateTime> {
+    OffsetDateTime::parse(s, &Rfc3339).ok()
+}
+
+/// Parse a user-supplied timestamp, mapping a bad value to a `CONFIG` error.
+pub fn require_rfc3339(flag: &str, s: &str) -> Result<OffsetDateTime> {
+    OffsetDateTime::parse(s, &Rfc3339)
+        .map_err(|_| AppError::config(format!("{flag} must be ISO-8601 (RFC-3339): got '{s}'")))
 }
 
 #[cfg(test)]

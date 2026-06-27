@@ -15,10 +15,12 @@ mod config;
 mod error;
 mod http;
 mod model;
+mod otp;
 mod output;
 mod receive;
 mod store;
 mod util;
+mod wait;
 
 use clap::Parser;
 

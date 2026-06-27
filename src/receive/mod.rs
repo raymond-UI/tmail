@@ -4,6 +4,8 @@
 //! epic, so any backend that can list messages gets them for free.
 
 pub mod mailtm;
+#[cfg(feature = "sse")]
+pub mod sse;
 
 use async_trait::async_trait;
 

@@ -84,8 +84,8 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         Command::Rm(a) => commands::inbox::run_rm(&ctx, &a).await,
         Command::Read(a) => commands::read::run_read(&ctx, &a).await,
         Command::Get(a) => commands::read::run_get(&ctx, &a).await,
-        Command::Wait(_) => not_implemented("wait"),
-        Command::Otp(_) => not_implemented("otp"),
+        Command::Wait(a) => commands::wait::run_wait(&ctx, &a).await,
+        Command::Otp(a) => commands::wait::run_otp(&ctx, &a).await,
         Command::Send(_) => not_implemented("send"),
     }
 }
