@@ -10,12 +10,14 @@
 
 mod app;
 mod cli;
+mod commands;
 mod config;
 mod error;
 mod http;
 mod model;
 mod output;
 mod receive;
+mod store;
 mod util;
 
 use clap::Parser;
