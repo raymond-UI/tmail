@@ -13,7 +13,10 @@ mod cli;
 mod config;
 mod error;
 mod http;
+mod model;
 mod output;
+mod receive;
+mod util;
 
 use clap::Parser;
 
