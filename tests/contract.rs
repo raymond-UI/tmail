@@ -98,10 +98,36 @@ fn ls_empty_is_json_array_exit_0() {
 }
 
 #[test]
-fn rm_unknown_is_idempotent_exit_0() {
+fn rm_unknown_is_idempotent_exit_0_but_reports_not_existed() {
     let out = run(&["rm", "nope"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(out.stdout.contains("\"removed\":\"nope\""));
+    // Idempotent success, but the caller can tell nothing was actually there.
+    assert!(out.stdout.contains("\"existed\":false"));
+}
+
+#[test]
+fn get_accepts_single_positional_msg_id() {
+    // With no target and no handle/inbox, a lone positional is treated as the
+    // msgId; resolution then fails with our CONFIG error — crucially NOT a clap
+    // "missing MSG_ID" usage error (exit 2). Proves the positional fix.
+    let out = run(&["get", "somemsgid"]);
+    assert_ne!(
+        out.code, 2,
+        "should not be a clap usage error: {}",
+        out.stdout
+    );
+    assert_eq!(out.code, 7, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("\"code\":\"CONFIG\""));
+}
+
+#[test]
+fn usage_error_is_json_with_config_code_not_exit_2() {
+    // Unknown flag -> our JSON envelope + CONFIG(7), never the bare clap exit 2.
+    let out = run(&["read", "x", "--no-such-flag"]);
+    assert_eq!(out.code, 7, "stderr: {}", out.stderr);
+    assert_stdout_is_one_json_value(&out.stdout);
+    assert!(out.stdout.contains("\"code\":\"CONFIG\""));
 }
 
 #[test]

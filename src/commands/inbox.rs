@@ -40,8 +40,11 @@ pub async fn run_rm(ctx: &Ctx, args: &RmArgs) -> Result<()> {
     // Stateless: delete using the supplied handle, nothing local to forget.
     if let Some(blob) = &ctx.globals.handle {
         let handle = Handle::decode(blob)?;
-        let _ = ctx.receiver()?.delete(&handle).await; // best-effort
-        return emit_success(&json!({ "removed": handle.address }), ctx.pretty());
+        let existed = ctx.receiver()?.delete(&handle).await.is_ok();
+        return emit_success(
+            &json!({ "removed": handle.address, "existed": existed }),
+            ctx.pretty(),
+        );
     }
 
     let target = args.target.as_deref().ok_or_else(|| {
@@ -55,7 +58,9 @@ pub async fn run_rm(ctx: &Ctx, args: &RmArgs) -> Result<()> {
     if let Some(record) = &removed {
         let _ = ctx.receiver()?.delete(&record.handle).await; // best-effort
     }
-    // Unknown target still exits 0; echo the resolved id when we had one.
+    // Idempotent: unknown target still exits 0, but `existed` tells the caller
+    // whether anything was actually there (DESIGN.md §4).
+    let existed = removed.is_some();
     let id = removed.map(|r| r.id).unwrap_or_else(|| target.to_string());
-    emit_success(&json!({ "removed": id }), ctx.pretty())
+    emit_success(&json!({ "removed": id, "existed": existed }), ctx.pretty())
 }

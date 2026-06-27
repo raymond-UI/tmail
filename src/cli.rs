@@ -93,17 +93,22 @@ pub struct ReadArgs {
     pub limit: usize,
 }
 
-/// `tmail get <id|address> <msgId>`
+/// `tmail get <id|address> <msgId>` — or just `<msgId>` with `--handle`/one inbox.
 #[derive(Debug, Args)]
 pub struct GetArgs {
-    /// Inbox id or address (optional when `--handle` is supplied).
+    /// Inbox id or address; omit (give only `<msgId>`) when using `--handle` or
+    /// when exactly one inbox is stored.
+    #[arg(value_name = "TARGET")]
     pub target: Option<String>,
-    /// The message id to fetch.
-    pub msg_id: String,
-    /// Return the raw HTML body.
+    /// The message id. When only one positional is given it is taken as the
+    /// message id and the inbox is resolved from `--handle` / the sole inbox.
+    #[arg(value_name = "MSG_ID")]
+    pub msg_id: Option<String>,
+    /// Include only the HTML body field in the JSON output.
     #[arg(long, conflicts_with = "text")]
     pub html: bool,
-    /// Return plain text only (default for agents).
+    /// Include only the plain-text body field in the JSON output (default
+    /// includes both).
     #[arg(long)]
     pub text: bool,
 }

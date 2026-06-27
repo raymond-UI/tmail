@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::app::Ctx;
 use crate::cli::{GetArgs, ReadArgs};
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::model::Message;
 use crate::output::emit_success;
 use crate::receive::Receiver;
@@ -41,8 +41,16 @@ pub async fn run_read(ctx: &Ctx, args: &ReadArgs) -> Result<()> {
 
 /// `tmail get` — full body of one message.
 pub async fn run_get(ctx: &Ctx, args: &GetArgs) -> Result<()> {
-    let handle = ctx.resolve_handle(args.target.as_deref())?;
-    let message: Message = ctx.receiver()?.get(&handle, &args.msg_id).await?;
+    // Accept `<target> <msgId>` or a single `<msgId>` (inbox via --handle / sole
+    // inbox). With one positional, clap binds it to `target`, so shift it.
+    let (target, msg_id) = match (&args.target, &args.msg_id) {
+        (target, Some(msg_id)) => (target.as_deref(), msg_id.as_str()),
+        (Some(msg_id), None) => (None, msg_id.as_str()),
+        (None, None) => return Err(AppError::config("get needs a <msgId>")),
+    };
+
+    let handle = ctx.resolve_handle(target)?;
+    let message: Message = ctx.receiver()?.get(&handle, msg_id).await?;
 
     // Default emits both renderings; `--text`/`--html` narrow to one.
     let mut value = json!({

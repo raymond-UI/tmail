@@ -18,13 +18,17 @@ mod store;
 mod util;
 mod wait;
 
+use clap::error::ErrorKind;
 use clap::Parser;
 
 use crate::cli::Cli;
 use crate::error::{AppError, ErrorCode};
 
 fn main() {
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => exit_from_clap_error(e),
+    };
     let pretty = cli.globals.pretty;
 
     let result = build_runtime().and_then(|rt| rt.block_on(app::dispatch(cli)));
@@ -37,6 +41,32 @@ fn main() {
         }
     };
     std::process::exit(code);
+}
+
+/// Honor the agent contract for argument parsing: `--help`/`--version` print
+/// normally to stdout (exit 0); every other usage error becomes a JSON error
+/// envelope on stdout with a distinct `CONFIG` exit code (7) — never the `2`
+/// that collides with `NOT_FOUND`.
+fn exit_from_clap_error(e: clap::Error) -> ! {
+    match e.kind() {
+        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+            // Explicit --help/--version: clap renders it to stdout.
+            let _ = e.print();
+            std::process::exit(0);
+        }
+        _ => {
+            let message = e
+                .to_string()
+                .lines()
+                .next()
+                .unwrap_or("invalid usage")
+                .trim_start_matches("error: ")
+                .to_string();
+            let err = AppError::new(ErrorCode::Config, format!("usage: {message}"));
+            output::emit_error(&err, false);
+            std::process::exit(err.exit_code());
+        }
+    }
 }
 
 fn build_runtime() -> error::Result<tokio::runtime::Runtime> {

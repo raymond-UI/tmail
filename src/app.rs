@@ -57,16 +57,28 @@ impl Ctx {
             return Ok(handle);
         }
 
-        let target = target.ok_or_else(|| {
-            AppError::new(
-                ErrorCode::Config,
-                "this command needs <id|address> or --handle/TMAIL_HANDLE",
-            )
-        })?;
-        Store::open_default()?
-            .find(target)?
-            .map(|r| r.handle)
-            .ok_or_else(|| AppError::not_found(format!("no local inbox for '{target}'")))
+        let store = Store::open_default()?;
+        match target {
+            Some(target) => store
+                .find(target)?
+                .map(|r| r.handle)
+                .ok_or_else(|| AppError::not_found(format!("no local inbox for '{target}'"))),
+            // No target and no handle: fall back to the sole inbox if unambiguous.
+            None => {
+                let mut records = store.load()?;
+                match records.len() {
+                    1 => Ok(records.remove(0).handle),
+                    0 => Err(AppError::new(
+                        ErrorCode::Config,
+                        "no stored inbox; pass <id|address> or --handle/TMAIL_HANDLE",
+                    )),
+                    _ => Err(AppError::new(
+                        ErrorCode::Config,
+                        "multiple inboxes stored; specify <id|address> or --handle/TMAIL_HANDLE",
+                    )),
+                }
+            }
+        }
     }
 }
 
