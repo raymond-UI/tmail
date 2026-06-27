@@ -1,0 +1,45 @@
+[package]
+name = "tmail"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "An agent-first disposable-email CLI: mint inboxes, read/await mail, send via SMTP."
+license = "MIT"
+repository = "https://github.com/raymond-UI/tmail"
+readme = "README.md"
+keywords = ["email", "cli", "disposable", "otp", "agent"]
+categories = ["command-line-utilities", "email"]
+
+[[bin]]
+name = "tmail"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-std"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
+html2text = "0.12"
+regex = "1"
+directories = "5"
+toml = "0.8"
+time = { version = "0.3", features = ["formatting", "parsing", "serde-well-known", "macros"] }
+rand = "0.8"
+thiserror = "2"
+async-trait = "0.1"
+base64 = "0.22"
+
+[features]
+# Real-time delivery via the mail.tm Mercure hub. Polling is always available;
+# this is an optimization layered on top (DESIGN.md §6, §14).
+sse = ["dep:reqwest-eventsource"]
+
+[dependencies.reqwest-eventsource]
+version = "0.6"
+optional = true
+
+[profile.release]
+strip = true
+lto = "thin"
