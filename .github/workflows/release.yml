@@ -1,0 +1,58 @@
+name: release
+
+# Cut a release by pushing a tag like `v0.1.0`. Each matrix target builds a
+# stripped release binary, tarballs/zips it with a SHA-256 checksum, and uploads
+# it to the GitHub Release for the tag. `install.sh` consumes these assets.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  upload-assets:
+    name: ${{ matrix.target }}
+    strategy:
+      # One flaky cross target must not block the others from publishing.
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # aws-lc-rs (pulled in by rustls) needs NASM to build on Windows.
+      - name: Install NASM (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+
+      # Sets up the cross linker/toolchain so `cargo build --target` works for
+      # the musl and aarch64 Linux targets (no-op for the native host target).
+      - name: Set up cross toolchain (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build and upload
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: tmail
+          target: ${{ matrix.target }}
+          archive: $bin-$target
+          checksum: sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
