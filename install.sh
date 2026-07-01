@@ -52,7 +52,9 @@ if [ -z "$version" ]; then
 fi
 
 archive="${BIN}-${target}.tar.gz"
-url="https://github.com/$REPO/releases/download/$version/$archive"
+base="https://github.com/$REPO/releases/download/$version"
+url="$base/$archive"
+sum_url="$base/${BIN}-${target}.sha256"
 
 # --- install dir ----------------------------------------------------------
 dir="${TMAIL_INSTALL_DIR:-}"
@@ -69,7 +71,7 @@ info "downloading $BIN $version ($target)"
 curl -sSfL "$url" -o "$tmp/$archive" || err "download failed: $url"
 
 # Verify the SHA-256 when the checksum asset is present.
-if curl -sSfL "$url.sha256" -o "$tmp/$archive.sha256" 2>/dev/null; then
+if curl -sSfL "$sum_url" -o "$tmp/$archive.sha256" 2>/dev/null; then
   expected="$(awk '{print $1}' "$tmp/$archive.sha256")"
   if have sha256sum; then
     actual="$(sha256sum "$tmp/$archive" | awk '{print $1}')"
