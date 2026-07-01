@@ -12,8 +12,19 @@ permissions:
   contents: write
 
 jobs:
+  # The upload action attaches assets to an *existing* Release, so create it
+  # from the tag first; the build matrix then uploads into it.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   upload-assets:
     name: ${{ matrix.target }}
+    needs: create-release
     strategy:
       # One flaky cross target must not block the others from publishing.
       fail-fast: false
