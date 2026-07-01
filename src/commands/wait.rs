@@ -10,8 +10,14 @@ use crate::error::{AppError, ErrorCode, Result};
 use crate::model::Message;
 use crate::otp;
 use crate::output::emit_success;
-use crate::util::require_rfc3339;
+use crate::util::{parse_rfc3339, require_rfc3339};
 use crate::wait::{wait_for_match, Filters, RealClock};
+
+/// Skew guard subtracted from an inbox's creation time when it seeds the default
+/// baseline. A fresh inbox holds no mail predating its creation, so nudging the
+/// baseline slightly earlier can't match stale mail — it only absorbs clock skew
+/// between our host and the provider's message timestamps.
+const CREATED_AT_SKEW_GUARD_SECS: i64 = 300;
 
 /// Shared block-until-match used by both `wait` and `otp`.
 async fn await_message(
@@ -25,9 +31,17 @@ async fn await_message(
     let handle = ctx.resolve_handle(target)?;
     let receiver = ctx.receiver()?;
 
+    // Baseline precedence: explicit `--since` wins; otherwise seed from the
+    // inbox's creation time (minus a skew guard) so a code that arrived before
+    // this process started is still matched. Handles minted before `created_at`
+    // existed fall through to `None`, i.e. the legacy snapshot baseline.
     let since = match since {
         Some(s) => Some(require_rfc3339("--since", s)?),
-        None => None,
+        None => handle
+            .created_at
+            .as_deref()
+            .and_then(parse_rfc3339)
+            .map(|t| t - time::Duration::seconds(CREATED_AT_SKEW_GUARD_SECS)),
     };
     // Command --timeout > global --timeout > config > default (DESIGN.md §4).
     let deadline = Duration::from_secs(ctx.config.wait_timeout_secs(timeout));

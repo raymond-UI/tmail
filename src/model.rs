@@ -17,6 +17,12 @@ pub struct Handle {
     pub address: String,
     pub password: String,
     pub token: String,
+    /// ISO-8601 inbox creation time. Seeds the default `wait`/`otp` baseline so
+    /// a code that landed before the waiter started is still seen (no race).
+    /// Optional for backward compatibility with handles minted before this
+    /// field existed; when absent, `wait`/`otp` fall back to snapshot baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 }
 
 impl Handle {
@@ -144,6 +150,7 @@ mod tests {
             address: "a@b.com".into(),
             password: "pw".into(),
             token: "tok".into(),
+            created_at: Some("2026-06-27T18:40:00Z".into()),
         }
     }
 

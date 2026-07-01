@@ -133,6 +133,7 @@ mod tests {
                 address: addr.into(),
                 password: "pw".into(),
                 token: "tok".into(),
+                created_at: Some("2026-06-27T18:40:00Z".into()),
             },
             created_at: "2026-06-27T18:40:00Z".into(),
         }

@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use time::OffsetDateTime;
 
-use crate::error::{AppError, Result};
+use crate::diag;
+use crate::error::{AppError, ErrorCode, Result};
 use crate::model::{Handle, Message};
 use crate::receive::Receiver;
 use crate::util::parse_rfc3339;
@@ -125,7 +126,19 @@ pub async fn wait_for_match(
     let mut snapshot: Option<HashSet<String>> = None;
 
     loop {
-        let mut messages = receiver.read(handle).await?;
+        // A transient provider hiccup (429/network) must not abort a long wait:
+        // back off and keep polling until the real deadline (DESIGN.md §6).
+        let mut messages = match receiver.read(handle).await {
+            Ok(m) => m,
+            Err(e) if is_retryable(&e) => {
+                if clock.elapsed() >= deadline {
+                    return Err(e);
+                }
+                back_off(&e, interval, deadline, clock).await;
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         messages.sort_by_key(|m| std::cmp::Reverse(parse_rfc3339(&m.date)));
 
         let baseline = match since {
@@ -139,7 +152,8 @@ pub async fn wait_for_match(
 
         if let Some(m) = pick_match(&messages, &baseline, &filters) {
             let id = m.id.clone();
-            return receiver.get(handle, &id).await;
+            // We found the match; don't lose it to a transient error on hydrate.
+            return get_with_retry(receiver, handle, &id, interval, deadline, clock).await;
         }
 
         if clock.elapsed() >= deadline {
@@ -150,6 +164,55 @@ pub async fn wait_for_match(
         }
         let remaining = deadline.saturating_sub(clock.elapsed());
         clock.sleep(interval.min(remaining)).await;
+    }
+}
+
+/// Errors worth retrying mid-poll rather than aborting the wait: rate limiting
+/// and transient transport failures. Everything else (auth, not-found, config)
+/// is terminal.
+fn is_retryable(e: &AppError) -> bool {
+    matches!(
+        e.code,
+        ErrorCode::RateLimited | ErrorCode::Network | ErrorCode::Timeout
+    )
+}
+
+/// Sleep after a retryable error: honor the provider's `Retry-After` when given,
+/// else the normal poll interval, and never overshoot the remaining deadline.
+async fn back_off(e: &AppError, interval: Duration, deadline: Duration, clock: &dyn Clock) {
+    let wait = e
+        .retry_after_ms
+        .map(Duration::from_millis)
+        .unwrap_or(interval);
+    let remaining = deadline.saturating_sub(clock.elapsed());
+    diag::log(1, || {
+        format!(
+            "wait: transient {} ({}); backing off {}ms",
+            e.code,
+            e.message,
+            wait.min(remaining).as_millis()
+        )
+    });
+    clock.sleep(wait.min(remaining)).await;
+}
+
+/// Hydrate the matched message, tolerating transient errors until the deadline.
+async fn get_with_retry(
+    receiver: &dyn Receiver,
+    handle: &Handle,
+    id: &str,
+    interval: Duration,
+    deadline: Duration,
+    clock: &dyn Clock,
+) -> Result<Message> {
+    loop {
+        match receiver.get(handle, id).await {
+            Ok(m) => return Ok(m),
+            Err(e) if is_retryable(&e) && clock.elapsed() < deadline => {
+                back_off(&e, interval, deadline, clock).await;
+            }
+            Err(e) => return Err(e),
+        }
     }
 }
 
@@ -254,8 +317,9 @@ mod tests {
     }
 
     struct FakeReceiver {
-        // One Vec<Message> per successive read() call.
-        reads: Mutex<std::collections::VecDeque<Vec<Message>>>,
+        // One result per successive read() call (an Err injects a transient
+        // failure); an exhausted queue reads as empty.
+        reads: Mutex<std::collections::VecDeque<Result<Vec<Message>>>>,
     }
     #[async_trait]
     impl Receiver for FakeReceiver {
@@ -264,7 +328,7 @@ mod tests {
         }
         async fn read(&self, _h: &Handle) -> Result<Vec<Message>> {
             let mut q = self.reads.lock().unwrap();
-            Ok(q.pop_front().unwrap_or_default())
+            q.pop_front().unwrap_or_else(|| Ok(Vec::new()))
         }
         async fn get(&self, _h: &Handle, msg_id: &str) -> Result<Message> {
             Ok(msg(msg_id, "a@x", "s", false, "2026-06-27T11:00:00Z"))
@@ -280,15 +344,16 @@ mod tests {
             address: "a@x.com".into(),
             password: "pw".into(),
             token: "tok".into(),
+            created_at: Some("2026-06-27T09:00:00Z".into()),
         }
     }
 
     #[tokio::test]
     async fn returns_message_once_a_new_one_arrives() {
         let reads = [
-            vec![], // empty at start -> snapshot is empty
-            vec![], // still nothing
-            vec![msg("new", "a@x", "s", false, "2026-06-27T11:00:00Z")],
+            Ok(vec![]), // empty at start -> snapshot is empty
+            Ok(vec![]), // still nothing
+            Ok(vec![msg("new", "a@x", "s", false, "2026-06-27T11:00:00Z")]),
         ]
         .into_iter()
         .collect();
@@ -310,6 +375,123 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(got.id, "new");
+    }
+
+    #[tokio::test]
+    async fn since_baseline_resolves_on_already_present_message() {
+        // The pre-start race: the code is already in the inbox on the very first
+        // read. A `since` baseline (as seeded from the inbox's creation time)
+        // must resolve immediately — no snapshot exclusion, seen or not.
+        let reads = [Ok(vec![msg(
+            "code",
+            "noreply@acme.com",
+            "Your code",
+            true, // already marked seen by a prior debug read — must not matter
+            "2026-06-27T10:00:00Z",
+        )])]
+        .into_iter()
+        .collect();
+        let receiver = FakeReceiver {
+            reads: Mutex::new(reads),
+        };
+        let clock = FakeClock {
+            elapsed_ms: AtomicU64::new(0),
+        };
+        let since = parse_rfc3339("2026-06-27T09:00:00Z");
+        let got = wait_for_match(
+            &receiver,
+            &handle(),
+            since,
+            Filters::default(),
+            Duration::from_secs(1),
+            Duration::from_secs(60),
+            &clock,
+        )
+        .await
+        .unwrap();
+        assert_eq!(got.id, "code");
+    }
+
+    #[tokio::test]
+    async fn transient_rate_limit_is_retried_not_fatal() {
+        // First read is a 429 with a backoff hint; the wait must survive it and
+        // resolve on the message that follows.
+        let reads = [
+            Err(AppError::rate_limited("slow down", Some(500))),
+            Ok(vec![]), // recovered; empty -> seeds an empty snapshot
+            Ok(vec![msg("new", "a@x", "s", false, "2026-06-27T11:00:00Z")]),
+        ]
+        .into_iter()
+        .collect();
+        let receiver = FakeReceiver {
+            reads: Mutex::new(reads),
+        };
+        let clock = FakeClock {
+            elapsed_ms: AtomicU64::new(0),
+        };
+        let got = wait_for_match(
+            &receiver,
+            &handle(),
+            None,
+            Filters::default(),
+            Duration::from_secs(1),
+            Duration::from_secs(60),
+            &clock,
+        )
+        .await
+        .unwrap();
+        assert_eq!(got.id, "new");
+    }
+
+    #[tokio::test]
+    async fn persistent_rate_limit_surfaces_after_deadline() {
+        // Nothing but 429s until the deadline: the caller should learn it was
+        // rate-limited (exit 3), not a generic timeout.
+        let reads = std::iter::repeat_with(|| Err(AppError::rate_limited("nope", Some(1000))))
+            .take(10)
+            .collect();
+        let receiver = FakeReceiver {
+            reads: Mutex::new(reads),
+        };
+        let clock = FakeClock {
+            elapsed_ms: AtomicU64::new(0),
+        };
+        let err = wait_for_match(
+            &receiver,
+            &handle(),
+            None,
+            Filters::default(),
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+            &clock,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::RateLimited);
+    }
+
+    #[tokio::test]
+    async fn terminal_error_is_not_retried() {
+        // A non-transient error (auth) must abort the wait immediately.
+        let reads = [Err(AppError::auth("bad token"))].into_iter().collect();
+        let receiver = FakeReceiver {
+            reads: Mutex::new(reads),
+        };
+        let clock = FakeClock {
+            elapsed_ms: AtomicU64::new(0),
+        };
+        let err = wait_for_match(
+            &receiver,
+            &handle(),
+            None,
+            Filters::default(),
+            Duration::from_secs(1),
+            Duration::from_secs(60),
+            &clock,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Auth);
     }
 
     #[tokio::test]

@@ -150,18 +150,20 @@ impl Receiver for MailTm {
         let account = self.create_account(&address, &password).await?;
         let token = self.token(&account.address, &password).await?;
 
+        let created_at = util::now_rfc3339();
         let handle = Handle {
             account_id: account.id,
             address: account.address.clone(),
             password,
             token,
+            created_at: Some(created_at.clone()),
         };
         Ok(InboxRecord {
             id: util::gen_short_id(),
             address: account.address,
             provider: "mail.tm".to_string(),
             handle,
-            created_at: util::now_rfc3339(),
+            created_at,
         })
     }
 
