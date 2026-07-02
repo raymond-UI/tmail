@@ -35,7 +35,8 @@ pub struct GlobalArgs {
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
-    /// Carry an inbox handle out-of-band instead of using the local store.
+    /// Carry an inbox handle out-of-band instead of using the local store
+    /// (the base64 blob from `tmail new --stateless`, not an inbox id).
     #[arg(long, global = true, env = "TMAIL_HANDLE")]
     pub handle: Option<String>,
 
@@ -125,6 +126,8 @@ pub struct WaitArgs {
     #[arg(long)]
     pub subject: Option<String>,
     /// Override the baseline: resolve on any message at/after this timestamp.
+    /// Strictly older mail is excluded — capture the anchor before triggering
+    /// the send.
     #[arg(long)]
     pub since: Option<String>,
     /// Deadline in seconds (overrides the global `--timeout`).
@@ -144,6 +147,8 @@ pub struct OtpArgs {
     #[arg(long)]
     pub subject: Option<String>,
     /// Override the baseline: consider any message at/after this timestamp.
+    /// Strictly older mail is excluded — capture the anchor before triggering
+    /// the send.
     #[arg(long)]
     pub since: Option<String>,
     /// Deadline in seconds (overrides the global `--timeout`).

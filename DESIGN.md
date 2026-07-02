@@ -135,14 +135,19 @@ Flags: `--html` (raw HTML), `--text` (plain only, default for agents).
 **Block** until a new message arrives, then print it (same shape as `get`).
 The core agent verb. Uses mail.tm SSE when available, else polls with backoff.
 
-**Definition of "new" (resolves the OTP race):** at command start, `wait`
-snapshots the set of message ids already in the inbox. It resolves on the first
-message whose id is **not** in that snapshot. *Exception:* any message already
-present at start that is **unseen** *and* matches an active `--from`/`--subject`
-filter resolves immediately — this catches the common case where the mail lands
-between the agent submitting a form and calling `wait`. Passing `--since <iso>`
-replaces the snapshot baseline with a timestamp: any message dated at/after it
-qualifies, seen or not.
+**Definition of "new" (resolves the OTP race):** the default baseline is the
+inbox's creation time (minus a small clock-skew guard): any message dated
+at/after it qualifies, seen or not — so a code that landed *before* `wait`
+started still resolves immediately. Handles minted before `created_at` was
+recorded fall back to a snapshot baseline: at command start, `wait` snapshots
+the message ids already in the inbox and resolves on the first id **not** in
+that snapshot (exception: an already-present **unseen** message matching an
+active `--from`/`--subject` filter resolves immediately). Passing
+`--since <iso>` overrides the baseline with an explicit timestamp. `--since`
+strictly excludes older mail — capture the anchor **before** triggering the
+send, or a code that arrives a second early will never match. On `6 TIMEOUT`,
+the error message notes near-misses (mail that was present but excluded by the
+baseline or filters) so a dead wait is debuggable from the error alone.
 
 Flags: `--from <substr>`, `--subject <substr>` (only resolve on a match),
 `--since <iso>` (override the baseline), `--timeout <secs>` (default 120; exit

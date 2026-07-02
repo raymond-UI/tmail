@@ -157,13 +157,62 @@ pub async fn wait_for_match(
         }
 
         if clock.elapsed() >= deadline {
-            return Err(AppError::timeout(format!(
-                "no matching message within {}s",
-                deadline.as_secs()
-            )));
+            let mut msg = format!("no matching message within {}s", deadline.as_secs());
+            if let Some(detail) = timeout_detail(&messages, &baseline, &filters) {
+                msg.push_str("; note: ");
+                msg.push_str(&detail);
+            }
+            return Err(AppError::timeout(msg));
         }
         let remaining = deadline.saturating_sub(clock.elapsed());
         clock.sleep(interval.min(remaining)).await;
+    }
+}
+
+/// Explain a timeout when mail was present but excluded. "Nothing arrived" and
+/// "your baseline/filters excluded what arrived" need different fixes, and a
+/// bare TIMEOUT hides which one happened (a `--since` anchor taken a second
+/// too late reads as a dead 120s hang without this).
+fn timeout_detail(
+    messages: &[Message],
+    baseline: &Baseline,
+    filters: &Filters,
+) -> Option<String> {
+    let matching: Vec<&Message> = messages.iter().filter(|m| filters.matches(m)).collect();
+    if matching.is_empty() {
+        if filters.active() && !messages.is_empty() {
+            return Some(format!(
+                "{} message(s) in the inbox but none matched the --from/--subject filters",
+                messages.len()
+            ));
+        }
+        return None;
+    }
+    match baseline {
+        Baseline::Since(since) => {
+            // `messages` is sorted newest-first, so the first match is the
+            // closest near-miss to the anchor.
+            let newest = matching.first()?;
+            let gap = parse_rfc3339(&newest.date)
+                .map(|d| (*since - d).whole_seconds())
+                .filter(|s| *s >= 0);
+            Some(match gap {
+                Some(secs) => format!(
+                    "{} matching message(s) predate the --since baseline (newest, from {}, arrived {}s before it) — capture the --since anchor before triggering the send",
+                    matching.len(),
+                    newest.from,
+                    secs
+                ),
+                None => format!(
+                    "{} matching message(s) were excluded by the --since baseline",
+                    matching.len()
+                ),
+            })
+        }
+        Baseline::Snapshot(_) => Some(format!(
+            "{} matching message(s) were already in the inbox when the wait started (the snapshot baseline resolves only on new arrivals) — pass --since <iso> or use `read` to see them",
+            matching.len()
+        )),
     }
 }
 
@@ -515,5 +564,140 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, crate::error::ErrorCode::Timeout);
+    }
+
+    // --- timeout near-miss diagnostics -------------------------------------
+
+    /// Reads that return the same messages on every poll until the deadline.
+    fn steady_receiver(messages: Vec<Message>) -> FakeReceiver {
+        let reads = std::iter::repeat_with(|| Ok(messages.clone()))
+            .take(10)
+            .collect();
+        FakeReceiver {
+            reads: Mutex::new(reads),
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_explains_message_just_before_since_anchor() {
+        // The "--since anchor taken a second too late" hang: the code is in the
+        // inbox the whole time but predates the baseline. The timeout must say
+        // so instead of reading as "nothing arrived".
+        let receiver = steady_receiver(vec![msg(
+            "code",
+            "noreply@acme.com",
+            "Your code",
+            false,
+            "2026-06-27T10:00:00Z",
+        )]);
+        let clock = FakeClock {
+            elapsed_ms: AtomicU64::new(0),
+        };
+        let err = wait_for_match(
+            &receiver,
+            &handle(),
+            parse_rfc3339("2026-06-27T10:00:02Z"),
+            Filters::default(),
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+            &clock,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Timeout);
+        assert!(err.message.contains("predate the --since baseline"), "{}", err.message);
+        assert!(err.message.contains("noreply@acme.com"), "{}", err.message);
+        assert!(err.message.contains("2s before"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn timeout_explains_snapshot_excluded_message() {
+        // A seen, already-present message matches the filter but the snapshot
+        // baseline (rightly) never resolves on it; the timeout should point at
+        // --since rather than leaving a mystery.
+        let receiver = steady_receiver(vec![msg(
+            "m1",
+            "noreply@github.com",
+            "Verify",
+            true,
+            "2026-06-27T10:00:00Z",
+        )]);
+        let clock = FakeClock {
+            elapsed_ms: AtomicU64::new(0),
+        };
+        let err = wait_for_match(
+            &receiver,
+            &handle(),
+            None,
+            Filters {
+                from: Some("github"),
+                subject: None,
+            },
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+            &clock,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Timeout);
+        assert!(err.message.contains("already in the inbox"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn timeout_explains_filters_matching_nothing() {
+        // Mail arrived but the --from filter missed it (wrong substring): the
+        // timeout should say the inbox wasn't empty.
+        let receiver = steady_receiver(vec![msg(
+            "m1",
+            "noreply@acme.com",
+            "Your code",
+            false,
+            "2026-06-27T10:00:00Z",
+        )]);
+        let clock = FakeClock {
+            elapsed_ms: AtomicU64::new(0),
+        };
+        let err = wait_for_match(
+            &receiver,
+            &handle(),
+            parse_rfc3339("2026-06-27T09:00:00Z"),
+            Filters {
+                from: Some("github"),
+                subject: None,
+            },
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+            &clock,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Timeout);
+        assert!(
+            err.message.contains("none matched the --from/--subject filters"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_on_truly_empty_inbox_has_no_note() {
+        let receiver = FakeReceiver {
+            reads: Mutex::new(std::collections::VecDeque::new()),
+        };
+        let clock = FakeClock {
+            elapsed_ms: AtomicU64::new(0),
+        };
+        let err = wait_for_match(
+            &receiver,
+            &handle(),
+            None,
+            Filters::default(),
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+            &clock,
+        )
+        .await
+        .unwrap_err();
+        assert!(!err.message.contains("note:"), "{}", err.message);
     }
 }

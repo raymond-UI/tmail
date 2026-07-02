@@ -1,6 +1,6 @@
 [package]
 name = "tmail"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.85"
 description = "An agent-first disposable-email CLI: mint inboxes, read/await mail, send via SMTP."
