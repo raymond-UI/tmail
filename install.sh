@@ -46,8 +46,19 @@ esac
 # --- resolve version ------------------------------------------------------
 version="${TMAIL_VERSION:-}"
 if [ -z "$version" ]; then
+  # Resolve "latest" from the github.com redirect, not the REST API: the
+  # unauthenticated API is rate-limited per IP (60/h) and 403s on busy
+  # machines/CI, while the redirect is not metered.
+  redirect="$(curl -sSfL -o /dev/null -w '%{url_effective}' \
+    "https://github.com/$REPO/releases/latest" 2>/dev/null)" || redirect=""
+  case "$redirect" in
+    */tag/*) version="${redirect##*/tag/}" ;;
+  esac
+fi
+if [ -z "$version" ]; then
+  # Fall back to the API for environments where the redirect is intercepted.
   version="$(curl -sSfL "https://api.github.com/repos/$REPO/releases/latest" \
-    | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/')"
+    | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/')" || version=""
   [ -n "$version" ] || err "could not determine the latest version; set TMAIL_VERSION"
 fi
 
