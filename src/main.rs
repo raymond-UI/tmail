@@ -56,6 +56,13 @@ fn exit_from_clap_error(e: clap::Error) -> ! {
             let _ = e.print();
             std::process::exit(0);
         }
+        ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
+            // A bare `tmail` with no subcommand is a discovery gesture, not a
+            // usage error: render the full help to stdout (clap would send this
+            // kind to stderr) and exit 0.
+            print!("{}", e.render());
+            std::process::exit(0);
+        }
         _ => {
             let message = e
                 .to_string()

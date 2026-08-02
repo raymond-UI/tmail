@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 
 /// An agent-first disposable-email CLI.
 #[derive(Debug, Parser)]
-#[command(name = "tmail", version, about, long_about = None)]
+#[command(name = "tmail", version, about, long_about = None, arg_required_else_help = true)]
 pub struct Cli {
     /// Flags common to every subcommand.
     #[command(flatten)]

@@ -149,8 +149,22 @@ fn read_limit_zero_is_config_not_silent_empty() {
 }
 
 #[test]
-fn missing_subcommand_is_usage_error() {
-    // clap usage errors are distinct from our runtime contract codes.
+fn bare_invocation_prints_help_exit_0() {
+    // Running `tmail` with no subcommand is a discovery gesture, not a usage
+    // error: it prints the full help to stdout and exits 0.
     let out = run(&[]);
-    assert_ne!(out.code, 0);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("Usage: tmail"));
+    assert!(out.stdout.contains("Commands:"));
+    // Help is human-facing text, not the JSON error envelope.
+    assert!(!out.stdout.contains("\"error\""));
+}
+
+#[test]
+fn unrecognized_subcommand_is_config_exit_7() {
+    // A genuine usage error (a bogus subcommand) still maps to our JSON
+    // envelope with CONFIG(7), never clap's bare exit 2.
+    let out = run(&["bogus"]);
+    assert_eq!(out.code, 7, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("\"code\":\"CONFIG\""));
 }
